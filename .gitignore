@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+dist/
+build/
+.pytest_cache/
+
+# Local config / secrets
+.env
+config.json
+config.local.json
+config.json.bak*
+*.bak
+*.log
+
+# Runtime accounts and tokens
+accounts_cli.txt
+accounts_*.txt
+mail_credentials.txt
+emails_used.txt
+emails_error.txt
+token.json
+outlook_mailboxes.txt
+outlook_mail_state.json
+
+# Generated credentials / browser artifacts
+cpa_auths/
+cookies/
+screenshots/

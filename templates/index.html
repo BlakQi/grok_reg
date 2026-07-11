@@ -1,0 +1,1310 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grok 注册机管理控制台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0b0d12;--card:#151821;--border:#262a36;--text:#f4f4f5;--muted:#a1a1aa;
+--accent:#4f46e5;--accent-hover:#6366f1;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;
+--font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+.app{max-width:1300px;margin:0 auto;padding:24px}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--border);margin-bottom:28px}
+header h1{font-size:22px;font-weight:700;letter-spacing:-0.02em}
+header .status-wrapper{display:flex;align-items:center;gap:12px}
+header .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+header .status-dot.idle{background:var(--muted)}
+header .status-dot.running{background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1)}
+.stat-card .label{font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.stat-card .value{font-size:32px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat-card .value.green{color:var(--green)}
+.stat-card .value.red{color:var(--red)}
+
+.grid-main{display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start;margin-bottom:28px}
+.sidebar-panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1)}
+.sidebar-panel h2{font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text);border-left:3px solid var(--accent);padding-left:8px}
+
+.controls-form{display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:12px;font-weight:500;color:var(--muted)}
+.field input,.field select{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:14px;width:100%;font-family:var(--font);transition:border-color .15s}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+button{font-family:var(--font);font-size:13px;font-weight:600;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-danger{background:var(--red);color:#fff;width:100%}
+.btn-danger:hover{background:#dc2626}
+.btn-secondary{background:var(--border);color:var(--text);border:1px solid rgba(255,255,255,0.05)}
+.btn-secondary:hover{background:#323646}
+.btn-sm{padding:4px 8px;font-size:11px;border-radius:4px;font-weight:500}
+
+.content-area{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);min-height:500px;display:flex;flex-direction:column}
+.tabs{display:flex;background:rgba(0,0,0,0.2);border-bottom:1px solid var(--border);border-top-left-radius:10px;border-top-right-radius:10px}
+.tab{padding:14px 24px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:600;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:#fff;border-bottom-color:var(--accent);background:rgba(255,255,255,0.02)}
+.tab-content{display:none;padding:24px;flex-grow:1}
+.tab-content.active{display:block}
+
+/* Logs */
+.logs-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
+.log-filter{flex-grow:1;max-width:300px}
+.log-panel{background:var(--bg);border:1px solid var(--border);border-radius:8px;height:450px;overflow-y:auto;padding:16px;font-family:var(--mono);font-size:12px;line-height:1.7}
+.log-panel .log-line{white-space:pre-wrap;word-break:break-all;border-bottom:1px solid rgba(255,255,255,0.02);padding:2px 0}
+.log-panel .log-line .ts{color:var(--muted);margin-right:8px;font-variant-numeric:tabular-nums}
+.log-panel .log-line.success{color:var(--green)}
+.log-panel .log-line.error{color:var(--red)}
+.log-panel .log-line.info{color:var(--accent-hover)}
+
+/* Accounts Table */
+.accounts-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+.import-panel{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:flex;flex-direction:column;gap:10px}
+.import-panel textarea{background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:12px;line-height:1.5;font-family:var(--mono);width:100%;min-height:110px;resize:vertical}
+.import-panel textarea:focus{outline:none;border-color:var(--accent)}
+.import-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.import-summary{font-size:12px;color:var(--muted)}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+table{width:100%;border-collapse:collapse;text-align:left}
+th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding:14px 16px;border-bottom:1px solid var(--border);font-weight:600;background:rgba(0,0,0,0.1)}
+td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+tr:hover td{background:rgba(255,255,255,0.01)}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+.badge-green{background:rgba(16,185,129,0.15);color:var(--green)}
+.badge-gray{background:rgba(161,161,170,0.15);color:var(--muted)}
+.badge-yellow{background:rgba(245,158,11,0.15);color:var(--yellow);animation:pulse 1s infinite}
+.copy-btn{cursor:pointer;color:var(--accent-hover);margin-left:6px;display:inline-flex;align-items:center}
+.copy-btn:hover{color:#fff}
+.probe-res{font-size:11px;margin-top:4px;font-family:var(--mono)}
+.probe-res.ok{color:var(--green)}
+.probe-res.err{color:var(--red)}
+
+/* Diagnostics */
+.diag-section{margin-bottom:24px}
+.diag-section h3{font-size:14px;font-weight:700;margin-bottom:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em}
+.diag-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+.diag-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+.diag-item:last-child{border-bottom:none}
+.diag-item .label{color:var(--muted)}
+.diag-item .val{font-family:var(--mono);word-break:break-all;text-align:right}
+
+/* Config Config category styles */
+.config-section-title{font-size:14px;font-weight:700;color:var(--accent-hover);margin-top:20px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:6px;grid-column: span 2}
+.config-panel{display:flex;flex-direction:column;gap:16px}
+.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px}
+.config-field{display:flex;flex-direction:column;gap:6px}
+.config-field label{font-size:12px;color:var(--muted);font-weight:600}
+.config-field input,.config-field select{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:13px;font-family:var(--font);width:100%}
+.config-field input:focus{outline:none;border-color:var(--accent)}
+.config-actions{display:flex;justify-content:space-between;align-items:center;margin-top:16px;border-top:1px solid var(--border);padding-top:16px;gap:12px}
+
+.custom-key-row{display:flex;gap:12px;align-items:center;background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;border:1px dashed var(--border);margin-top:12px}
+
+.toast{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;padding:12px 24px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 10px 15px -3px rgba(0,0,0,0.3);opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;z-index:100}
+.toast.show{opacity:1;transform:translateY(0)}
+
+@media(max-width:960px){
+.grid-main{grid-template-columns:1fr}
+.config-grid{grid-template-columns:1fr}
+.config-section-title{grid-column: span 1}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Grok 注册机控制台</h1>
+    <div class="status-wrapper">
+      <span class="status-dot idle" id="statusDot"></span>
+      <span id="statusText" style="font-weight: 600;">系统就绪</span>
+    </div>
+  </header>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="label">已保存账号数</div><div class="value" id="statAccounts">0</div></div>
+    <div class="stat-card"><div class="label">CPA OIDC文件</div><div class="value" id="statCpa">0</div></div>
+    <div class="stat-card"><div class="label">本次注册成功</div><div class="value green" id="statRegOk">0</div></div>
+    <div class="stat-card"><div class="label">本次注册失败</div><div class="value red" id="statRegFail">0</div></div>
+    <div class="stat-card"><div class="label">本次CPA成功</div><div class="value green" id="statCpaOk">0</div></div>
+  </div>
+
+  <div class="grid-main">
+    <div class="sidebar-panel">
+      <h2>任务控制面板</h2>
+      <div class="controls-form" style="margin-top: 16px;">
+        <div class="field">
+          <label>本次新增注册数量</label>
+          <input type="number" id="inputExtra" value="1" min="1" max="100">
+        </div>
+        <div class="field">
+          <label>并发线程数</label>
+          <input type="number" id="inputThreads" value="1" min="1" max="10">
+        </div>
+        <div style="margin-top: 8px;">
+          <button class="btn-primary" id="btnStart" onclick="startReg()" style="width: 100%;">启动批量注册</button>
+          <button class="btn-danger" id="btnStop" onclick="stopReg()" style="display:none">停止注册任务</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="tabs" id="mainTabs">
+        <div class="tab active" data-tab="logs">实时日志</div>
+        <div class="tab" data-tab="accounts">账号列表</div>
+        <div class="tab" data-tab="mailboxes">邮箱管理</div>
+        <div class="tab" data-tab="config">配置管理</div>
+        <div class="tab" data-tab="diagnostics">系统诊断</div>
+      </div>
+
+      <!-- Tab: Logs -->
+      <div class="tab-content active" id="tab-logs">
+        <div class="logs-header">
+          <input type="text" class="field" style="max-width: 250px; padding: 6px 12px; font-size: 13px;" id="logFilter" placeholder="过滤日志（如 M1、W1）..." oninput="filterLogs()">
+          <button class="btn-secondary btn-sm" onclick="clearLogPanel()">清空日志</button>
+        </div>
+        <div class="log-panel" id="logPanel"></div>
+      </div>
+
+      <!-- Tab: Accounts -->
+      <div class="tab-content" id="tab-accounts">
+        <div class="accounts-toolbar">
+          <div style="color: var(--muted); font-size: 13px;">
+            提示: 点击密码或SSO可以一键复制，对于缺少CPA凭证的账号可以直接进行补签。
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn-secondary btn-sm" onclick="downloadCpaExport('sub2api')">导出 sub2api</button>
+            <button class="btn-secondary btn-sm" onclick="downloadCpaExport('cpa')">导出 CPA zip</button>
+            <button class="btn-primary btn-sm" onclick="backfillAllMissingCPA()">一键补签所有缺失 CPA</button>
+          </div>
+        </div>
+        <div class="import-panel">
+          <textarea id="accountImportText" spellcheck="false" placeholder="每行一个账号：邮箱----密码----SSO"></textarea>
+          <div class="import-actions">
+            <span class="import-summary" id="accountImportSummary">支持批量粘贴，重复邮箱会自动跳过。</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-secondary btn-sm" onclick="clearAccountImport()">清空</button>
+              <button class="btn-primary btn-sm" id="btnImportAccounts" onclick="importAccounts()">导入账号</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 50px;">序号</th>
+                <th>邮箱</th>
+                <th>密码</th>
+                <th>SSO Cookie</th>
+                <th style="width: 120px;">CPA (OIDC)</th>
+                <th style="width: 220px; text-align: center;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="accountsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: Mailboxes -->
+      <div class="tab-content" id="tab-mailboxes">
+        <div class="import-panel">
+          <textarea id="outlookImportText" spellcheck="false" placeholder="每行一个 Outlook：邮箱----密码----client_id----refresh_token"></textarea>
+          <div class="import-actions">
+            <span class="import-summary" id="outlookImportSummary">Outlook/Hotmail 池支持 plus alias 分裂，分裂数量在配置管理里设置。</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-secondary btn-sm" onclick="clearOutlookImport()">清空</button>
+              <button class="btn-primary btn-sm" id="btnImportOutlook" onclick="importOutlookMailboxes()">导入 Outlook</button>
+            </div>
+          </div>
+        </div>
+        <div class="diag-section">
+          <h3>Outlook 邮箱池</h3>
+          <div class="diag-card">
+            <div class="diag-item"><span class="label">基础邮箱</span><span class="val" id="outlookBaseCount">-</span></div>
+            <div class="diag-item"><span class="label">分裂后总数</span><span class="val" id="outlookExpandedCount">-</span></div>
+            <div class="diag-item"><span class="label">可用</span><span class="val" id="outlookAvailableCount">-</span></div>
+            <div class="diag-item"><span class="label">占用中</span><span class="val" id="outlookBusyCount">-</span></div>
+            <div class="diag-item"><span class="label">已使用</span><span class="val" id="outlookUsedCount">-</span></div>
+            <div class="diag-item"><span class="label">失败</span><span class="val" id="outlookFailedCount">-</span></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn-secondary btn-sm" onclick="loadOutlookMailboxes()">刷新统计</button>
+            <button class="btn-secondary btn-sm" onclick="resetOutlookPool('retryable')">释放占用/失败</button>
+            <button class="btn-secondary btn-sm" onclick="resetOutlookPool('invalid')">清除失效标记</button>
+            <button class="btn-danger btn-sm" onclick="resetOutlookPool('all')">重置全部状态</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Config -->
+      <div class="tab-content" id="tab-config">
+        <div class="config-panel">
+          <div class="config-grid" id="configGrid"></div>
+          
+          <div class="custom-key-row">
+            <span style="font-size:12px; font-weight:600; color:var(--muted)">新增自定义配置项：</span>
+            <input type="text" id="newConfigKey" placeholder="配置名称" style="background:var(--bg); border:1px solid var(--border); color:#fff; border-radius:6px; padding:6px 10px; width:200px; font-size:13px">
+            <input type="text" id="newConfigVal" placeholder="配置值" style="background:var(--bg); border:1px solid var(--border); color:#fff; border-radius:6px; padding:6px 10px; width:220px; font-size:13px">
+            <button class="btn-secondary btn-sm" onclick="addNewConfigField()" style="padding:6px 14px">添加</button>
+          </div>
+
+          <div class="config-actions">
+            <button class="btn-primary" onclick="saveConfig()">保存配置</button>
+            <button class="btn-secondary" onclick="loadConfig()">重新加载</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Diagnostics -->
+      <div class="tab-content" id="tab-diagnostics">
+        <div class="diag-section">
+          <h3>本地依赖环境诊断</h3>
+          <div class="diag-card">
+            <div class="diag-item"><span class="label">操作系统</span><span class="val" id="diagPlatform">-</span></div>
+            <div class="diag-item"><span class="label">Python 运行环境</span><span class="val" id="diagPython">-</span></div>
+            <div class="diag-item"><span class="label">Chromium / Chrome 路径</span><span class="val" id="diagChrome">-</span></div>
+            <div class="diag-item"><span class="label">项目根路径</span><span class="val" id="diagWorkspace">-</span></div>
+          </div>
+          <button class="btn-secondary" onclick="runSysCheck()">运行系统检测</button>
+        </div>
+
+        <div class="diag-section">
+          <h3>邮箱服务接口调试</h3>
+          <div class="diag-card">
+            <div class="diag-item"><span class="label">接口状态</span><span class="val" id="mailTestStatus">未测试</span></div>
+            <div class="diag-item"><span class="label">响应时间</span><span class="val" id="mailTestTime">-</span></div>
+            <div class="diag-item"><span class="label">测试结果 / Token</span><span class="val" id="mailTestToken">-</span></div>
+          </div>
+          <button class="btn-primary" onclick="runMailTest()">测试当前邮箱配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+// Tabs
+$('#mainTabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  $$('.tab').forEach(t => t.classList.remove('active'));
+  $$('.tab-content').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  $('#tab-' + tab.dataset.tab).classList.add('active');
+  if (tab.dataset.tab === 'accounts') loadAccounts();
+  if (tab.dataset.tab === 'mailboxes') loadOutlookMailboxes();
+  if (tab.dataset.tab === 'config') loadConfig();
+  if (tab.dataset.tab === 'diagnostics') runSysCheck();
+});
+
+// Toast
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// Escaping
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Copy helper
+function copyToClipboard(text, msg = '已复制到剪贴板') {
+  navigator.clipboard.writeText(text).then(() => {
+    toast(msg);
+  }).catch(() => {
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast(msg);
+  });
+}
+
+// Status polling
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    $('#statAccounts').textContent = d.accounts_count;
+    $('#statCpa').textContent = d.cpa_count;
+    $('#statRegOk').textContent = d.stats.reg_success;
+    $('#statRegFail').textContent = d.stats.reg_fail;
+    $('#statCpaOk').textContent = d.stats.mint_success;
+    const dot = $('#statusDot');
+    const txt = $('#statusText');
+    if (d.running) {
+      dot.className = 'status-dot running';
+      txt.textContent = '注册运行中';
+      $('#btnStart').style.display = 'none';
+      $('#btnStop').style.display = '';
+    } else {
+      dot.className = 'status-dot idle';
+      txt.textContent = '空闲 (系统就绪)';
+      $('#btnStart').style.display = '';
+      $('#btnStop').style.display = 'none';
+    }
+  } catch(e) {}
+}
+setInterval(pollStatus, 2000);
+pollStatus();
+
+// SSE logs
+let evtSource = null;
+let allLogLines = [];
+function connectSSE() {
+  if (evtSource) evtSource.close();
+  evtSource = new EventSource('/api/logs/stream');
+  evtSource.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.msg === '__DONE__') { pollStatus(); loadAccounts(); return; }
+      allLogLines.push(d);
+      if (allLogLines.length > 1000) allLogLines.shift();
+      appendLogLine(d);
+    } catch(ex) {}
+  };
+  evtSource.onerror = () => {
+    setTimeout(connectSSE, 3000);
+  };
+}
+connectSSE();
+
+function appendLogLine(d) {
+  const filter = $('#logFilter').value.trim().toLowerCase();
+  if (filter && !d.msg.toLowerCase().includes(filter)) return;
+  
+  const panel = $('#logPanel');
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  if (d.msg.includes('OK') || d.msg.includes('success') || d.msg.startsWith('+') || d.msg.includes('成功'))
+    div.classList.add('success');
+  else if (d.msg.includes('!') || d.msg.includes('fail') || d.msg.includes('error') || d.msg.includes('失败'))
+    div.classList.add('error');
+  else if (d.msg.includes('[Web]') || d.msg.includes('[*]'))
+    div.classList.add('info');
+  div.innerHTML = '<span class="ts">' + (d.ts||'') + '</span>' + escHtml(d.msg);
+  panel.appendChild(div);
+  if (panel.children.length > 500)
+    panel.removeChild(panel.firstChild);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function filterLogs() {
+  const panel = $('#logPanel');
+  panel.innerHTML = '';
+  const filter = $('#logFilter').value.trim().toLowerCase();
+  allLogLines.forEach(d => {
+    if (!filter || d.msg.toLowerCase().includes(filter)) {
+      appendLogLine(d);
+    }
+  });
+}
+
+function clearLogPanel() {
+  $('#logPanel').innerHTML = '';
+  allLogLines = [];
+}
+
+// Start / Stop
+async function startReg() {
+  const extra = parseInt($('#inputExtra').value) || 1;
+  const threads = parseInt($('#inputThreads').value) || 1;
+  try {
+    const r = await fetch('/api/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({extra, threads})
+    });
+    const d = await r.json();
+    if (d.ok) { toast('注册任务已启动'); pollStatus(); }
+    else toast(d.error || '启动失败');
+  } catch(e) { toast('请求失败'); }
+}
+
+async function stopReg() {
+  try {
+    const r = await fetch('/api/stop', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) toast('已向后台发送停止请求');
+    else toast(d.error || '请求失败');
+  } catch(e) { toast('请求失败'); }
+}
+
+// Accounts Management
+let localAccountsList = [];
+async function loadAccounts() {
+  try {
+    const r = await fetch('/api/accounts');
+    localAccountsList = await r.json();
+    const body = $('#accountsBody');
+    body.innerHTML = '';
+    if (localAccountsList.length === 0) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px">暂无账号数据</td></tr>';
+      return;
+    }
+    for (const a of localAccountsList) {
+      const tr = document.createElement('tr');
+      tr.id = `row-acc-${a.id}`;
+      
+      const pwdDisplay = a.password.length > 3 ? a.password.slice(0,3) + '***' : '***';
+      const ssoDisplay = a.sso.length > 20 ? a.sso.slice(0,20) + '...' : a.sso;
+      
+      let cpaBadge = '';
+      if (a.is_minting) {
+        cpaBadge = '<span class="badge badge-yellow">补签中</span>';
+      } else if (a.has_cpa) {
+        cpaBadge = '<span class="badge badge-green">已生成</span>';
+      } else {
+        cpaBadge = '<span class="badge badge-gray">缺失</span>';
+      }
+      
+      let actHtml = '';
+      if (a.has_cpa) {
+        actHtml = `
+          <button class="btn-secondary btn-sm" onclick="probeCPA('${a.email}', this)">探针测试</button>
+          <button class="btn-secondary btn-sm" onclick="copyToClipboard('${escJsString(a.cpa_raw)}', 'CPA OIDC JSON 已复制')">复制 OIDC</button>
+        `;
+      } else {
+        actHtml = `
+          <button class="btn-primary btn-sm" onclick="mintSingleCPA('${a.email}', '${a.password}', '${a.sso}', this)" ${a.is_minting ? 'disabled' : ''}>补签 CPA</button>
+        `;
+      }
+      
+      tr.innerHTML = `
+        <td>${a.id}</td>
+        <td>${escHtml(a.email)}</td>
+        <td style="font-family:var(--mono)">
+          <span>${escHtml(pwdDisplay)}</span>
+          <span class="copy-btn" onclick="copyToClipboard('${escJsString(a.password)}', '密码已复制')" title="复制原始密码">&#128203;</span>
+        </td>
+        <td style="font-family:var(--mono);font-size:11px">
+          <span>${escHtml(ssoDisplay)}</span>
+          <span class="copy-btn" onclick="copyToClipboard('${escJsString(a.sso)}', 'SSO Cookie 已复制')" title="复制完整SSO">&#128203;</span>
+        </td>
+        <td>
+          <div id="cpa-badge-${a.id}">${cpaBadge}</div>
+          <div id="probe-res-${a.id}" class="probe-res"></div>
+        </td>
+        <td style="text-align: center; display: flex; gap: 6px; justify-content: center; align-items: center; min-height: 48px;">
+          ${actHtml}
+        </td>
+      `;
+      body.appendChild(tr);
+    }
+  } catch(e) {}
+}
+
+function escJsString(s) {
+  return (s || '').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+function clearAccountImport() {
+  $('#accountImportText').value = '';
+  $('#accountImportSummary').textContent = '支持批量粘贴，重复邮箱会自动跳过。';
+}
+
+async function downloadCpaExport(format) {
+  const url = format === 'cpa' ? '/api/cpa/export/cpa' : '/api/cpa/export/sub2api';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      let msg = '导出失败';
+      try {
+        const d = await r.json();
+        msg = d.error || msg;
+      } catch (_) {}
+      toast(msg);
+      return;
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const match = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i);
+    const filename = decodeURIComponent((match && (match[1] || match[2])) || (format === 'cpa' ? 'cpa-auths.zip' : 'sub2api.json'));
+    const link = document.createElement('a');
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    toast(format === 'cpa' ? 'CPA zip 已导出' : 'sub2api JSON 已导出');
+  } catch(e) {
+    toast('导出请求失败');
+  }
+}
+
+async function importAccounts() {
+  const text = $('#accountImportText').value.trim();
+  const summary = $('#accountImportSummary');
+  const btn = $('#btnImportAccounts');
+  if (!text) {
+    toast('请先粘贴账号内容');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  summary.textContent = '正在导入账号...';
+
+  try {
+    const r = await fetch('/api/accounts/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      const msg = d.error || '导入失败';
+      summary.textContent = msg;
+      toast(msg);
+      return;
+    }
+
+    const msg = `新增 ${d.imported} 个，重复 ${d.skipped_duplicates} 个，格式错误 ${d.invalid_count} 行`;
+    summary.textContent = msg;
+    toast('账号导入完成');
+    if (d.imported > 0) {
+      $('#accountImportText').value = '';
+    }
+    await loadAccounts();
+    pollStatus();
+  } catch(e) {
+    summary.textContent = '网络请求失败';
+    toast('导入请求失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入账号';
+  }
+}
+
+function clearOutlookImport() {
+  $('#outlookImportText').value = '';
+  $('#outlookImportSummary').textContent = 'Outlook/Hotmail 池支持 plus alias 分裂，分裂数量在配置管理里设置。';
+}
+
+function renderOutlookStats(stats = {}) {
+  $('#outlookBaseCount').textContent = stats.base ?? 0;
+  $('#outlookExpandedCount').textContent = stats.expanded ?? 0;
+  $('#outlookAvailableCount').textContent = stats.available ?? 0;
+  $('#outlookBusyCount').textContent = stats.in_use ?? 0;
+  $('#outlookUsedCount').textContent = stats.used ?? 0;
+  $('#outlookFailedCount').textContent = (stats.failed ?? 0) + (stats.invalid ?? 0);
+}
+
+async function loadOutlookMailboxes() {
+  try {
+    const r = await fetch('/api/mailboxes/outlook');
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      toast(d.error || '加载 Outlook 邮箱池失败');
+      return;
+    }
+    renderOutlookStats(d.stats || {});
+  } catch(e) {
+    toast('加载 Outlook 邮箱池失败');
+  }
+}
+
+async function importOutlookMailboxes() {
+  const text = $('#outlookImportText').value.trim();
+  const summary = $('#outlookImportSummary');
+  const btn = $('#btnImportOutlook');
+  if (!text) {
+    toast('请先粘贴 Outlook 邮箱内容');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  summary.textContent = '正在导入 Outlook 邮箱池...';
+  try {
+    const r = await fetch('/api/mailboxes/outlook/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      const msg = d.error || '导入 Outlook 失败';
+      summary.textContent = msg;
+      toast(msg);
+      return;
+    }
+    const msg = `新增 ${d.imported} 个，更新 ${d.updated} 个，格式错误 ${d.invalid} 行`;
+    summary.textContent = msg;
+    $('#outlookImportText').value = '';
+    renderOutlookStats((d.stats || {}));
+    toast('Outlook 邮箱池导入完成');
+  } catch(e) {
+    summary.textContent = '网络请求失败';
+    toast('导入 Outlook 请求失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入 Outlook';
+  }
+}
+
+async function resetOutlookPool(scope) {
+  try {
+    const r = await fetch('/api/mailboxes/outlook/reset', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scope})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      toast(d.error || '重置 Outlook 状态失败');
+      return;
+    }
+    renderOutlookStats(d.stats || {});
+    toast(`已清理 ${d.removed || 0} 条 Outlook 状态`);
+  } catch(e) {
+    toast('重置 Outlook 状态失败');
+  }
+}
+
+// Mint single account CPA
+async function mintSingleCPA(email, password, sso, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '拉起中...';
+  }
+  toast(`正在为 ${email} 异步拉起补签程序...`);
+  try {
+    const r = await fetch('/api/cpa/mint_single', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email, password, sso})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('补签任务拉起成功，请关注日志和浏览器确认。');
+      loadAccounts();
+    } else {
+      toast(d.error || '补签启动失败');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '补签 CPA';
+      }
+    }
+  } catch(e) {
+    toast('网络请求失败');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '补签 CPA';
+    }
+  }
+}
+
+// Batch backfill missing
+async function backfillAllMissingCPA() {
+  const missing = localAccountsList.filter(a => !a.has_cpa && !a.is_minting);
+  if (missing.length === 0) {
+    toast('没有需要补全CPA凭证的账号');
+    return;
+  }
+  toast(`准备批量补签 ${missing.length} 个账号...`);
+  
+  for (const acc of missing) {
+    try {
+      await fetch('/api/cpa/mint_single', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: acc.email, password: acc.password, sso: acc.sso})
+      });
+      toast(`已排队补签: ${acc.email}`);
+      await new Promise(r => setTimeout(r, 1500));
+    } catch(e) {}
+  }
+  loadAccounts();
+}
+
+// Probe CPA file
+async function probeCPA(email, btn) {
+  const acc = localAccountsList.find(a => a.email === email);
+  if (!acc) return;
+  const resEl = $(`#probe-res-${acc.id}`);
+  resEl.className = 'probe-res';
+  resEl.textContent = '正在发起探针...';
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '检测中...';
+  }
+  
+  try {
+    const r = await fetch('/api/cpa/probe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email})
+    });
+    const d = await r.json();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '探针测试';
+    }
+    
+    if (d.ok) {
+      resEl.className = 'probe-res ok';
+      resEl.innerHTML = `&#9989; 正常 (grok-4.5) <span style="color:var(--muted); font-size:10px">${d.elapsed}s</span>`;
+      toast(`${email} 探针检测成功，支持 Grok 4.5`);
+    } else {
+      resEl.className = 'probe-res err';
+      resEl.textContent = '❌ ' + (d.error || '无 grok-4.5 可用');
+      toast(`${email} 探针检测不可用`);
+    }
+  } catch(e) {
+    resEl.className = 'probe-res err';
+    resEl.textContent = '❌ 探针请求异常';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '探针测试';
+    }
+  }
+}
+
+// Diagnostics
+async function runSysCheck() {
+  try {
+    const r = await fetch('/api/test/sys_check');
+    const d = await r.json();
+    $('#diagPlatform').textContent = d.platform;
+    $('#diagPython').textContent = d.python_version.split('\n')[0];
+    $('#diagChrome').textContent = d.chrome_path;
+    $('#diagWorkspace').textContent = d.workspace;
+  } catch(e) {}
+}
+
+async function runMailTest() {
+  $('#mailTestStatus').textContent = '正在测试当前邮箱配置...';
+  $('#mailTestStatus').style.color = 'var(--muted)';
+  $('#mailTestTime').textContent = '-';
+  $('#mailTestToken').textContent = '-';
+
+  try {
+    const r = await fetch('/api/test/mail', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      const provider = d.provider ? `（${d.provider}）` : '';
+      $('#mailTestStatus').textContent = `连接成功${provider}`;
+      $('#mailTestStatus').style.color = 'var(--green)';
+      $('#mailTestTime').textContent = `${d.elapsed}s`;
+      $('#mailTestToken').textContent = d.token || (d.note || 'OK');
+      toast('邮箱配置测试通过');
+    } else {
+      $('#mailTestStatus').textContent = '失败：' + (d.error || '未知错误');
+      $('#mailTestStatus').style.color = 'var(--red)';
+      toast('邮箱配置测试失败');
+    }
+  } catch (e) {
+    $('#mailTestStatus').textContent = '网络请求出错';
+    $('#mailTestStatus').style.color = 'var(--red)';
+    toast('连接接口异常');
+  }
+}
+
+// Config Category Lists
+const CONFIG_SECTIONS = {
+  "邮箱验证码配置": [
+    "email_provider", "defaultDomains",
+    "cloudmail_url", "cloudmail_admin_email", "cloudmail_password",
+    "cloudflare_api_base", "cloudflare_api_key", "cloudflare_auth_mode",
+    "cloudflare_path_domains", "cloudflare_path_accounts", "cloudflare_path_token", "cloudflare_path_messages",
+    "duckmail_api_key", "yyds_api_key", "yyds_jwt",
+    "outlook_pool_file", "outlook_state_file", "outlook_alias_count", "outlook_alias_include_original",
+    "outlook_alias_prefix", "outlook_mode", "outlook_imap_host", "outlook_message_limit",
+    "tempmail_lol_api_key", "tempmail_lol_domains",
+    "gptmail_api_base", "gptmail_api_key", "gptmail_default_domain", "gptmail_local_compose",
+    "donemail_api_base", "donemail_admin_key", "donemail_domains", "donemail_email_prefix", "donemail_message_limit",
+    "moemail_api_base", "moemail_api_key", "moemail_domains", "moemail_expiry_time",
+    "inbucket_api_base", "inbucket_domains", "inbucket_random_subdomain",
+    "ddg_token", "ddg_cf_api_base", "ddg_cf_inbox_jwt", "ddg_cf_messages_path"
+  ],
+  "网络与浏览器": [
+    "proxy", "cpa_proxy", "user_agent", "enable_nsfw"
+  ],
+  "CPA 凭证生成": [
+    "cpa_export_enabled", "cpa_auth_dir", "cpa_copy_to_hotload", "cpa_hotload_dir",
+    "cpa_base_url", "cpa_headless", "cpa_force_standalone", "cpa_mint_workers",
+    "cpa_mint_cookie_inject", "cpa_mint_browser_reuse", "cpa_mint_browser_recycle_every",
+    "cpa_mint_queue_max", "cpa_mint_required", "cpa_probe_after_write", "cpa_probe_chat",
+    "cpa_mint_timeout_sec"
+  ],
+  "注册流程参数": [
+    "register_count", "register_threads", "thread_start_interval", "register_max_attempts",
+    "account_hard_timeout", "nav_email_button_timeout", "email_form_timeout",
+    "mail_timeout", "mail_poll_interval", "mail_retry_count", "code_form_timeout",
+    "profile_timeout", "turnstile_retry_limit", "turnstile_stuck_timeout",
+    "sso_timeout_base", "sso_timeout_max", "sso_progress_extension",
+    "sso_cookie_read_timeout", "email_submit_confirm_timeout", "show_tutorial_on_start"
+  ],
+  "grok2api 同步": [
+    "grok2api_auto_add_local", "grok2api_local_token_file", "grok2api_auto_add_remote",
+    "grok2api_remote_base", "grok2api_remote_app_key", "grok2api_pool_name",
+    "grok2api_import_retries", "grok2api_import_retry_delay"
+  ]
+};
+
+// 中文标签
+const CONFIG_LABELS = {
+  "email_provider": "邮箱服务商",
+  "defaultDomains": "注册邮箱域名（逗号分隔）",
+  "cloudmail_url": "CloudMail 管理端地址",
+  "cloudmail_admin_email": "CloudMail 管理员邮箱",
+  "cloudmail_password": "CloudMail 管理员密码",
+  "cloudflare_api_base": "Cloudflare Worker 根地址",
+  "cloudflare_api_key": "Cloudflare API 密钥",
+  "cloudflare_auth_mode": "Cloudflare 认证模式",
+  "cloudflare_path_domains": "域名列表接口路径",
+  "cloudflare_path_accounts": "新建邮箱接口路径",
+  "cloudflare_path_token": "获取 Token 接口路径",
+  "cloudflare_path_messages": "收取邮件接口路径",
+  "duckmail_api_key": "DuckMail API 密钥",
+  "yyds_api_key": "YYDS API 密钥",
+  "yyds_jwt": "YYDS JWT 凭证",
+  "outlook_pool_file": "Outlook 邮箱池文件",
+  "outlook_state_file": "Outlook 状态文件",
+  "outlook_alias_count": "Outlook 分裂邮箱数",
+  "outlook_alias_include_original": "包含原始 Outlook 邮箱",
+  "outlook_alias_prefix": "Outlook 分裂前缀",
+  "outlook_mode": "Outlook 收信模式",
+  "outlook_imap_host": "Outlook IMAP 服务器",
+  "outlook_message_limit": "Outlook 每轮读取邮件数",
+  "tempmail_lol_api_key": "TempMail.lol API Key",
+  "tempmail_lol_domains": "TempMail.lol 域名",
+  "gptmail_api_base": "GPTMail API 地址",
+  "gptmail_api_key": "GPTMail API Key",
+  "gptmail_default_domain": "GPTMail 默认域名",
+  "gptmail_local_compose": "GPTMail 本地拼接邮箱",
+  "donemail_api_base": "DoneMail API 地址",
+  "donemail_admin_key": "DoneMail Admin Key",
+  "donemail_domains": "DoneMail 域名",
+  "donemail_email_prefix": "DoneMail 邮箱前缀",
+  "donemail_message_limit": "DoneMail 每轮读取邮件数",
+  "moemail_api_base": "MoEmail API 地址",
+  "moemail_api_key": "MoEmail API Key",
+  "moemail_domains": "MoEmail 域名",
+  "moemail_expiry_time": "MoEmail 过期时间",
+  "inbucket_api_base": "Inbucket API 地址",
+  "inbucket_domains": "Inbucket 域名",
+  "inbucket_random_subdomain": "Inbucket 随机子域",
+  "ddg_token": "DDG Token",
+  "ddg_cf_api_base": "DDG 转发 Cloudflare 地址",
+  "ddg_cf_inbox_jwt": "DDG 转发收件箱 JWT",
+  "ddg_cf_messages_path": "DDG 转发收信路径",
+  "proxy": "注册主代理（可留空）",
+  "cpa_proxy": "CPA/OIDC 专用代理（可留空）",
+  "user_agent": "浏览器 User-Agent",
+  "enable_nsfw": "注册后尝试开启 NSFW",
+  "cpa_export_enabled": "注册成功后自动导出 CPA",
+  "cpa_auth_dir": "CPA 凭证保存目录",
+  "cpa_copy_to_hotload": "同步复制到热加载目录",
+  "cpa_hotload_dir": "CPA 热加载目录路径",
+  "cpa_base_url": "CPA 接口根地址",
+  "cpa_headless": "设备确认浏览器无头模式",
+  "cpa_force_standalone": "强制独立窗口完成授权",
+  "cpa_mint_workers": "CPA 并发处理线程数",
+  "cpa_mint_cookie_inject": "向确认流程注入 Cookie",
+  "cpa_mint_browser_reuse": "复用浏览器进程",
+  "cpa_mint_browser_recycle_every": "每 N 次后重启浏览器",
+  "cpa_mint_queue_max": "CPA 排队上限",
+  "cpa_mint_required": "CPA 失败则整号算失败",
+  "cpa_probe_after_write": "写出后探测 Grok 4.5",
+  "cpa_probe_chat": "探测时发送测试对话",
+  "cpa_mint_timeout_sec": "单号 CPA 超时（秒）",
+  "register_count": "目标注册账号总数",
+  "register_threads": "并发注册线程数",
+  "thread_start_interval": "线程错峰启动秒数",
+  "register_max_attempts": "单号最大重试次数",
+  "account_hard_timeout": "单号硬超时（秒）",
+  "nav_email_button_timeout": "等待「使用邮箱」按钮超时（秒）",
+  "email_form_timeout": "邮箱表单可见超时（秒）",
+  "mail_timeout": "收验证码总超时（秒）",
+  "mail_poll_interval": "邮件轮询间隔（秒）",
+  "mail_retry_count": "邮件 API 失败重试次数",
+  "code_form_timeout": "验证码表单超时（秒）",
+  "profile_timeout": "资料页超时（秒）",
+  "turnstile_retry_limit": "Turnstile 重试次数",
+  "turnstile_stuck_timeout": "Turnstile 卡住超时（秒）",
+  "sso_timeout_base": "等待 SSO 最短时间（秒）",
+  "sso_timeout_max": "等待 SSO 最长时间（秒）",
+  "sso_progress_extension": "SSO 有进度时延长（秒）",
+  "sso_cookie_read_timeout": "读取 Cookie 超时（秒）",
+  "email_submit_confirm_timeout": "提交邮箱后跳转确认超时（秒）",
+  "grok2api_auto_add_local": "写入本地 grok2api Token 文件",
+  "grok2api_local_token_file": "本地 Token 文件路径",
+  "grok2api_auto_add_remote": "自动导入远程 grok2api",
+  "grok2api_remote_base": "远程 grok2api 管理前缀",
+  "grok2api_remote_app_key": "远程 AppKey",
+  "grok2api_pool_name": "导入池名称",
+  "grok2api_import_retries": "远程导入重试次数",
+  "grok2api_import_retry_delay": "远程导入重试间隔（秒）",
+  "show_tutorial_on_start": "启动时显示新手引导"
+};
+
+// 选择不同邮箱服务商时，仅展示相关字段
+const PROVIDER_FIELDS = {
+  "cloudmail": [
+    "defaultDomains",
+    "cloudmail_url",
+    "cloudmail_admin_email",
+    "cloudmail_password"
+  ],
+  "cloudflare": [
+    "defaultDomains",
+    "cloudflare_api_base",
+    "cloudflare_api_key",
+    "cloudflare_auth_mode",
+    "cloudflare_path_domains",
+    "cloudflare_path_accounts",
+    "cloudflare_path_token",
+    "cloudflare_path_messages"
+  ],
+  "duckmail": [
+    "defaultDomains",
+    "duckmail_api_key"
+  ],
+  "yyds": [
+    "defaultDomains",
+    "yyds_api_key",
+    "yyds_jwt"
+  ],
+  "outlook": [
+    "outlook_pool_file",
+    "outlook_state_file",
+    "outlook_alias_count",
+    "outlook_alias_include_original",
+    "outlook_alias_prefix",
+    "outlook_mode",
+    "outlook_imap_host",
+    "outlook_message_limit"
+  ],
+  "tempmail_lol": [
+    "tempmail_lol_api_key",
+    "tempmail_lol_domains"
+  ],
+  "gptmail": [
+    "gptmail_api_base",
+    "gptmail_api_key",
+    "gptmail_default_domain",
+    "gptmail_local_compose"
+  ],
+  "donemail": [
+    "donemail_api_base",
+    "donemail_admin_key",
+    "donemail_domains",
+    "donemail_email_prefix",
+    "donemail_message_limit"
+  ],
+  "moemail": [
+    "moemail_api_base",
+    "moemail_api_key",
+    "moemail_domains",
+    "moemail_expiry_time"
+  ],
+  "inbucket": [
+    "inbucket_api_base",
+    "inbucket_domains",
+    "inbucket_random_subdomain"
+  ],
+  "ddg_mail": [
+    "ddg_token",
+    "ddg_cf_api_base",
+    "ddg_cf_inbox_jwt",
+    "ddg_cf_messages_path"
+  ]
+};
+
+const PROVIDER_ALIASES = {
+  "cloudmail_gen": "cloudmail",
+  "cloudflare_temp_email": "cloudflare",
+  "yyds_mail": "yyds",
+  "outlook_token": "outlook",
+  "done_mail": "donemail"
+};
+
+const ALL_PROVIDER_KEYS = [
+  "defaultDomains",
+  "cloudmail_url", "cloudmail_admin_email", "cloudmail_password",
+  "cloudflare_api_base", "cloudflare_api_key", "cloudflare_auth_mode",
+  "cloudflare_path_domains", "cloudflare_path_accounts", "cloudflare_path_token", "cloudflare_path_messages",
+  "duckmail_api_key", "yyds_api_key", "yyds_jwt",
+  "outlook_pool_file", "outlook_state_file", "outlook_alias_count", "outlook_alias_include_original",
+  "outlook_alias_prefix", "outlook_mode", "outlook_imap_host", "outlook_message_limit",
+  "tempmail_lol_api_key", "tempmail_lol_domains",
+  "gptmail_api_base", "gptmail_api_key", "gptmail_default_domain", "gptmail_local_compose",
+  "donemail_api_base", "donemail_admin_key", "donemail_domains", "donemail_email_prefix", "donemail_message_limit",
+  "moemail_api_base", "moemail_api_key", "moemail_domains", "moemail_expiry_time",
+  "inbucket_api_base", "inbucket_domains", "inbucket_random_subdomain",
+  "ddg_token", "ddg_cf_api_base", "ddg_cf_inbox_jwt", "ddg_cf_messages_path"
+];
+
+const CONFIG_DEFAULTS = {
+  "outlook_pool_file": "outlook_mailboxes.txt",
+  "outlook_state_file": "outlook_mail_state.json",
+  "outlook_alias_count": 0,
+  "outlook_alias_include_original": true,
+  "outlook_alias_prefix": "grok",
+  "outlook_mode": "auto",
+  "outlook_imap_host": "outlook.office365.com",
+  "outlook_message_limit": 10,
+  "tempmail_lol_api_key": "",
+  "tempmail_lol_domains": "",
+  "gptmail_api_base": "https://mail.chatgpt.org.uk",
+  "gptmail_api_key": "",
+  "gptmail_default_domain": "",
+  "gptmail_local_compose": false,
+  "donemail_api_base": "",
+  "donemail_admin_key": "",
+  "donemail_domains": "",
+  "donemail_email_prefix": "",
+  "donemail_message_limit": 20,
+  "moemail_api_base": "",
+  "moemail_api_key": "",
+  "moemail_domains": "",
+  "moemail_expiry_time": 0,
+  "inbucket_api_base": "",
+  "inbucket_domains": "",
+  "inbucket_random_subdomain": true,
+  "ddg_token": "",
+  "ddg_cf_api_base": "",
+  "ddg_cf_inbox_jwt": "",
+  "ddg_cf_messages_path": "/api/mails"
+};
+
+let currentConfig = {};
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    currentConfig = await r.json();
+    renderConfig(currentConfig);
+  } catch (e) {
+    toast('加载配置失败');
+  }
+}
+
+function renderConfig(cfg) {
+  const grid = $('#configGrid');
+  grid.innerHTML = '';
+
+  for (const [sectionName, keys] of Object.entries(CONFIG_SECTIONS)) {
+    // 邮箱区块始终显示服务商选择，其余字段按 provider 动态显隐
+    const availableKeys = keys.filter(k => k in cfg || k === 'email_provider' || ALL_PROVIDER_KEYS.includes(k));
+    // 仅展示 cfg 里已有的键；provider 相关键若缺失也补空字段，方便填写 CloudMail
+    const renderKeys = [];
+    for (const k of keys) {
+      if (k in cfg) renderKeys.push(k);
+      else if (k === 'email_provider' || ALL_PROVIDER_KEYS.includes(k) || k.startsWith('cloudmail_') || k.startsWith('cloudflare_') || k.startsWith('duckmail_') || k.startsWith('yyds_') || k.startsWith('outlook_') || k.startsWith('tempmail_lol_') || k.startsWith('gptmail_') || k.startsWith('donemail_') || k.startsWith('moemail_') || k.startsWith('inbucket_') || k.startsWith('ddg_')) {
+        if (!(k in cfg)) cfg[k] = (typeof currentConfig[k] !== 'undefined') ? currentConfig[k] : (CONFIG_DEFAULTS[k] ?? '');
+        if (k in cfg) renderKeys.push(k);
+      }
+    }
+    if (renderKeys.length === 0) continue;
+
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'config-section-title';
+    titleDiv.textContent = sectionName;
+    grid.appendChild(titleDiv);
+
+    for (const k of renderKeys) {
+      createFieldMarkup(k, cfg[k], grid);
+    }
+  }
+
+  const categorizedKeys = Object.values(CONFIG_SECTIONS).flat();
+  const restKeys = Object.keys(cfg).filter(k => !categorizedKeys.includes(k));
+  if (restKeys.length > 0) {
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'config-section-title';
+    titleDiv.textContent = '其它自定义配置项';
+    grid.appendChild(titleDiv);
+    for (const k of restKeys) {
+      createFieldMarkup(k, cfg[k], grid);
+    }
+  }
+
+  const providerSelect = document.querySelector('select[data-key="email_provider"]');
+  if (providerSelect) {
+    providerSelect.addEventListener('change', () => toggleProviderFields(providerSelect.value));
+    toggleProviderFields(providerSelect.value || 'cloudmail');
+  }
+}
+
+function toggleProviderFields(activeProvider) {
+  activeProvider = PROVIDER_ALIASES[activeProvider] || activeProvider;
+  ALL_PROVIDER_KEYS.forEach(k => {
+    const fieldDiv = document.querySelector(`.config-field[data-field-key="${k}"]`);
+    if (fieldDiv) fieldDiv.style.display = 'none';
+  });
+  const activeKeys = PROVIDER_FIELDS[activeProvider] || [];
+  activeKeys.forEach(k => {
+    const fieldDiv = document.querySelector(`.config-field[data-field-key="${k}"]`);
+    if (fieldDiv) fieldDiv.style.display = 'flex';
+  });
+}
+
+function createFieldMarkup(key, val, container) {
+  const div = document.createElement('div');
+  div.className = 'config-field';
+  div.dataset.fieldKey = key;
+
+  const labelText = CONFIG_LABELS[key] || key;
+  const safeVal = (val === null || typeof val === 'undefined') ? '' : val;
+
+  if (key === 'email_provider') {
+    const v = PROVIDER_ALIASES[String(safeVal || 'cloudmail')] || String(safeVal || 'cloudmail');
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <select data-key="${key}">
+        <option value="cloudmail" ${v === 'cloudmail' ? 'selected' : ''}>CloudMail 自建邮箱</option>
+        <option value="cloudflare" ${v === 'cloudflare' ? 'selected' : ''}>Cloudflare Worker 临时邮箱</option>
+        <option value="duckmail" ${v === 'duckmail' ? 'selected' : ''}>DuckMail</option>
+        <option value="yyds" ${v === 'yyds' ? 'selected' : ''}>YYDS 邮箱</option>
+        <option value="outlook" ${v === 'outlook' ? 'selected' : ''}>Outlook 邮箱池</option>
+        <option value="tempmail_lol" ${v === 'tempmail_lol' ? 'selected' : ''}>TempMail.lol</option>
+        <option value="gptmail" ${v === 'gptmail' ? 'selected' : ''}>GPTMail</option>
+        <option value="donemail" ${v === 'donemail' ? 'selected' : ''}>DoneMail</option>
+        <option value="moemail" ${v === 'moemail' ? 'selected' : ''}>MoEmail</option>
+        <option value="inbucket" ${v === 'inbucket' ? 'selected' : ''}>Inbucket</option>
+        <option value="ddg_mail" ${v === 'ddg_mail' ? 'selected' : ''}>DDG Mail</option>
+      </select>
+    `;
+  } else if (key === 'cloudflare_auth_mode') {
+    const v = String(safeVal || 'none');
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <select data-key="${key}">
+        <option value="none" ${v === 'none' ? 'selected' : ''}>无认证</option>
+        <option value="bearer" ${v === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+        <option value="x-api-key" ${v === 'x-api-key' ? 'selected' : ''}>X-API-Key</option>
+        <option value="x-admin-auth" ${v === 'x-admin-auth' ? 'selected' : ''}>x-admin-auth</option>
+        <option value="query-key" ${v === 'query-key' ? 'selected' : ''}>Query Key</option>
+      </select>
+    `;
+  } else if (key === 'outlook_mode') {
+    const v = String(safeVal || 'auto');
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <select data-key="${key}">
+        <option value="auto" ${v === 'auto' ? 'selected' : ''}>自动</option>
+        <option value="graph" ${v === 'graph' ? 'selected' : ''}>Microsoft Graph</option>
+        <option value="imap" ${v === 'imap' ? 'selected' : ''}>IMAP XOAUTH2</option>
+      </select>
+    `;
+  } else if (typeof safeVal === 'boolean') {
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <select data-key="${key}" data-type="boolean">
+        <option value="true" ${safeVal ? 'selected' : ''}>开启</option>
+        <option value="false" ${!safeVal ? 'selected' : ''}>关闭</option>
+      </select>
+    `;
+  } else if (typeof safeVal === 'number') {
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <input data-key="${key}" data-type="number" type="number" step="any" value="${escHtml(String(safeVal))}" />
+    `;
+  } else {
+    const isSecret = /password|api_key|jwt|app_key/i.test(key);
+    div.innerHTML = `
+      <label>${labelText}</label>
+      <input data-key="${key}" data-type="string" ${isSecret ? 'type="password"' : 'type="text"'} value="${escHtml(String(safeVal))}" placeholder="${isSecret ? '请输入密钥' : ''}" />
+    `;
+  }
+  container.appendChild(div);
+}
+
+function addNewConfigField() {
+  const k = $('#newConfigKey').value.trim();
+  const v = $('#newConfigVal').value.trim();
+  if (!k) {
+    toast('配置名称不能为空');
+    return;
+  }
+  if (k in currentConfig) {
+    toast('该配置项已存在，请直接在列表中编辑');
+    return;
+  }
+  let typedVal = v;
+  if (v === 'true') typedVal = true;
+  else if (v === 'false') typedVal = false;
+  else if (/^-?\d+$/.test(v)) typedVal = parseInt(v, 10);
+  else if (/^-?\d+\.\d+$/.test(v)) typedVal = parseFloat(v);
+  currentConfig[k] = typedVal;
+  renderConfig(currentConfig);
+  $('#newConfigKey').value = '';
+  $('#newConfigVal').value = '';
+  toast(`已添加配置项：${k}`);
+}
+
+function parseFieldValue(el) {
+  let v = el.value;
+  const typeHint = el.dataset.type || '';
+  if (typeHint === 'boolean' || (el.tagName === 'SELECT' && (v === 'true' || v === 'false') && el.options.length <= 2)) {
+    return v === 'true';
+  }
+  if (typeHint === 'number') {
+    if (v === '' || v === null) return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : v;
+  }
+  if (typeHint === 'string') return v;
+  // 通用推断：仅当明确是 true/false 字符串且是 boolean 下拉
+  if (el.tagName === 'SELECT') return v;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (/^-?\d+$/.test(v)) return parseInt(v, 10);
+  if (/^-?\d+\.\d+$/.test(v)) return parseFloat(v);
+  return v;
+}
+
+async function saveConfig() {
+  const data = Object.assign({}, currentConfig);
+  $$('#configGrid [data-key]').forEach(el => {
+    data[el.dataset.key] = parseFieldValue(el);
+  });
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('配置已成功保存到 config.json');
+      currentConfig = data;
+      loadConfig();
+    } else {
+      toast(d.error || '保存失败');
+    }
+  } catch (e) {
+    toast('保存失败');
+  }
+}
+
+loadConfig();
+</script>
+</body>
+</html>
