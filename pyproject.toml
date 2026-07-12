@@ -1,0 +1,14 @@
+[project]
+name = "grok-registrar-orig"
+version = "1.0.0"
+description = "Grok 注册机原版（Chrome + DrissionPage + turnstilePatch 扩展）"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "DrissionPage>=4.1",   # Chrome 自动化（含 turnstilePatch 扩展加载）
+    "curl_cffi>=0.7",      # HTTP client（带 TLS 指纹），邮箱 API + grok2api 调用
+    "flask>=3.1.3",
+]
+
+# application 模式：不构建 wheel，uv 只管依赖
+[tool.uv]
+package = false

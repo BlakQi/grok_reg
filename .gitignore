@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+dist/
+
+# secrets / local runtime
+config.json
+config.local.json
+config.json.bak*
+.env
+token.json
+accounts_*.txt
+accounts_cli*.txt
+emails_used.txt
+emails_error.txt
+mail_credentials.txt
+cpa_auths*/
+outlook_mailboxes.txt
+outlook_mail_state.json
+cookies/
+screenshots/
+*.log
+*.bak
