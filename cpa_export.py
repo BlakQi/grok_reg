@@ -100,9 +100,10 @@ def export_cpa_xai_for_account(
     if cpa_dir and not cpa_dir.is_absolute():
         cpa_dir = (_REG_DIR / cpa_dir).resolve()
 
-    # Priority: cpa_proxy > proxy > env. Config must beat shell https_proxy.
+    # Priority: cpa_proxy > proxy > env. Explicit empty config means direct.
     proxy = (cfg.get("cpa_proxy") or cfg.get("proxy") or "").strip()
-    if not proxy:
+    explicit_proxy_config = any(k in cfg for k in ("cpa_proxy", "proxy", "proxies"))
+    if not proxy and not explicit_proxy_config:
         proxy = (
             os.environ.get("https_proxy")
             or os.environ.get("HTTPS_PROXY")

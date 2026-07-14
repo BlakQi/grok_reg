@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -91,6 +91,12 @@ tr:last-child td{border-bottom:none}
 .probe-res{font-size:11px;margin-top:4px;font-family:var(--mono)}
 .probe-res.ok{color:var(--green)}
 .probe-res.err{color:var(--red)}
+.proxy-url{font-family:var(--mono);font-size:11px;word-break:break-all;color:var(--muted)}
+.proxy-label{font-weight:600;color:var(--text);margin-bottom:4px;word-break:break-all}
+.proxy-test{font-size:11px;font-family:var(--mono);margin-top:4px;min-height:16px}
+.proxy-test.ok{color:var(--green)}
+.proxy-test.err{color:var(--red)}
+.proxy-actions{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap}
 
 /* Diagnostics */
 .diag-section{margin-bottom:24px}
@@ -164,6 +170,7 @@ tr:last-child td{border-bottom:none}
       <div class="tabs" id="mainTabs">
         <div class="tab active" data-tab="logs">实时日志</div>
         <div class="tab" data-tab="accounts">账号列表</div>
+        <div class="tab" data-tab="proxies">代理管理</div>
         <div class="tab" data-tab="mailboxes">邮箱管理</div>
         <div class="tab" data-tab="config">配置管理</div>
         <div class="tab" data-tab="diagnostics">系统诊断</div>
@@ -216,6 +223,57 @@ tr:last-child td{border-bottom:none}
               </tr>
             </thead>
             <tbody id="accountsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: Proxies -->
+      <div class="tab-content" id="tab-proxies">
+        <div class="accounts-toolbar">
+          <div style="color: var(--muted); font-size: 13px;">
+            代理池按顺序轮询：第 1 个账号用第 1 个出口，第 2 个账号用第 2 个出口，循环使用。
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <span class="selected-hint" id="proxyCountHint">0 个代理</span>
+            <button class="btn-secondary btn-sm" onclick="loadProxies()">刷新</button>
+            <button class="btn-primary btn-sm" onclick="testAllProxies()">测试全部</button>
+          </div>
+        </div>
+        <div class="import-panel">
+          <div class="field">
+            <label>手动代理（保存后清空代理池，注册和 CPA/OIDC 都使用这个代理；留空=直连）</label>
+            <input type="text" id="manualProxyInput" placeholder="vless://... 或 http://127.0.0.1:7890">
+          </div>
+          <div class="import-actions">
+            <span class="import-summary" id="manualProxySummary">手动代理走原来的单代理流程。</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-secondary btn-sm" onclick="clearManualProxy()">清空直连</button>
+              <button class="btn-primary btn-sm" id="btnSaveManualProxy" onclick="saveManualProxy()">保存手动代理</button>
+            </div>
+          </div>
+        </div>
+        <div class="import-panel">
+          <textarea id="proxyImportText" spellcheck="false" placeholder="每行一个代理，支持 vless://、http://、socks5://"></textarea>
+          <div class="import-actions">
+            <span class="import-summary" id="proxyImportSummary">粘贴后一键导入，重复代理会自动跳过。</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-secondary btn-sm" onclick="clearProxyImport()">清空</button>
+              <button class="btn-primary btn-sm" id="btnImportProxies" onclick="importProxies()">导入代理</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 70px;">序号</th>
+                <th>代理出口</th>
+                <th style="width: 110px;">类型</th>
+                <th style="width: 150px;">测试结果</th>
+                <th style="width: 180px; text-align: center;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="proxiesBody"></tbody>
           </table>
         </div>
       </div>
@@ -312,6 +370,7 @@ $('#mainTabs').addEventListener('click', e => {
   tab.classList.add('active');
   $('#tab-' + tab.dataset.tab).classList.add('active');
   if (tab.dataset.tab === 'accounts') loadAccounts();
+  if (tab.dataset.tab === 'proxies') loadProxies();
   if (tab.dataset.tab === 'mailboxes') loadOutlookMailboxes();
   if (tab.dataset.tab === 'config') loadConfig();
   if (tab.dataset.tab === 'diagnostics') runSysCheck();
@@ -644,6 +703,233 @@ async function importAccounts() {
     btn.disabled = false;
     btn.textContent = '导入账号';
   }
+}
+
+// Proxy Management
+let localProxyList = [];
+
+async function loadProxies() {
+  try {
+    const r = await fetch('/api/proxies');
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      toast(d.error || '加载代理池失败');
+      return;
+    }
+    localProxyList = d.proxies || [];
+    const manualInput = $('#manualProxyInput');
+    const manualSummary = $('#manualProxySummary');
+    if (manualInput) manualInput.value = d.proxy || '';
+    if (manualSummary) {
+      const modeText = d.mode === 'pool' ? `当前使用代理池，${localProxyList.length} 个出口按顺序轮询。`
+        : (d.mode === 'manual' ? '当前使用手动代理，注册和 CPA/OIDC 使用同一个代理。' : '当前直连。');
+      manualSummary.textContent = modeText;
+    }
+    renderProxies();
+  } catch(e) {
+    toast('加载代理池失败');
+  }
+}
+
+function renderProxies() {
+  const body = $('#proxiesBody');
+  const hint = $('#proxyCountHint');
+  if (hint) hint.textContent = `${localProxyList.length} 个代理`;
+  body.innerHTML = '';
+  if (localProxyList.length === 0) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:40px">暂无代理，粘贴后一行一个导入</td></tr>';
+    return;
+  }
+  for (const p of localProxyList) {
+    const tr = document.createElement('tr');
+    tr.id = `row-proxy-${p.index}`;
+    tr.innerHTML = `
+      <td>${p.index + 1}</td>
+      <td>
+        <div class="proxy-label">${escHtml(p.label || '')}</div>
+        <div class="proxy-url">${escHtml(p.value || '')}</div>
+      </td>
+      <td><span class="badge badge-gray">${escHtml((p.kind || 'proxy').toUpperCase())}</span></td>
+      <td><div id="proxy-test-${p.index}" class="proxy-test">未测试</div></td>
+      <td>
+        <div class="proxy-actions">
+          <button class="btn-primary btn-sm" onclick="testProxy(${p.index}, this)">测试</button>
+          <button class="btn-secondary btn-sm" onclick="copyToClipboard(localProxyList.find(x => x.index === ${p.index})?.value || '', '代理已复制')">复制</button>
+          <button class="btn-danger btn-sm" style="width:auto" onclick="deleteProxy(${p.index})">删除</button>
+        </div>
+      </td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function clearProxyImport() {
+  $('#proxyImportText').value = '';
+  $('#proxyImportSummary').textContent = '粘贴后一键导入，重复代理会自动跳过。';
+}
+
+async function saveManualProxy() {
+  const proxy = $('#manualProxyInput').value.trim();
+  const summary = $('#manualProxySummary');
+  const btn = $('#btnSaveManualProxy');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  summary.textContent = '正在保存手动代理...';
+  try {
+    const r = await fetch('/api/proxies/manual', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({proxy})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      const msg = d.error || '保存手动代理失败';
+      summary.textContent = msg;
+      toast(msg);
+      return;
+    }
+    localProxyList = d.proxies || [];
+    if ($('#manualProxyInput')) $('#manualProxyInput').value = d.proxy || '';
+    if ($('#manualProxySummary')) $('#manualProxySummary').textContent = `当前使用代理池，${localProxyList.length} 个出口按顺序轮询。`;
+    renderProxies();
+    summary.textContent = proxy ? '当前使用手动代理，注册和 CPA/OIDC 使用同一个代理。' : '当前直连。';
+    toast(proxy ? '手动代理已保存' : '已切换为直连');
+  } catch(e) {
+    summary.textContent = '网络请求失败';
+    toast('保存手动代理请求失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存手动代理';
+  }
+}
+
+async function clearManualProxy() {
+  $('#manualProxyInput').value = '';
+  await saveManualProxy();
+}
+
+async function importProxies() {
+  const text = $('#proxyImportText').value.trim();
+  const summary = $('#proxyImportSummary');
+  const btn = $('#btnImportProxies');
+  if (!text) {
+    toast('请先粘贴代理内容');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  summary.textContent = '正在导入代理池...';
+  try {
+    const r = await fetch('/api/proxies/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      const msg = d.error || '导入代理失败';
+      summary.textContent = msg;
+      toast(msg);
+      return;
+    }
+    localProxyList = d.proxies || [];
+    if ($('#manualProxyInput')) $('#manualProxyInput').value = d.proxy || '';
+    if ($('#manualProxySummary')) $('#manualProxySummary').textContent = `当前使用代理池，${localProxyList.length} 个出口按顺序轮询。`;
+    renderProxies();
+    const msg = `新增 ${d.imported} 个，重复 ${d.skipped_duplicates} 个，格式错误 ${d.invalid_count} 行`;
+    summary.textContent = msg;
+    if (d.imported > 0) $('#proxyImportText').value = '';
+    toast('代理导入完成');
+  } catch(e) {
+    summary.textContent = '网络请求失败';
+    toast('导入代理请求失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入代理';
+  }
+}
+
+async function deleteProxy(index) {
+  const p = localProxyList.find(x => x.index === index);
+  if (!p) return;
+  if (!confirm(`确定删除第 ${index + 1} 个代理？`)) return;
+  try {
+    const r = await fetch('/api/proxies/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({index})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      toast(d.error || '删除代理失败');
+      return;
+    }
+    localProxyList = d.proxies || [];
+    renderProxies();
+    toast('代理已删除');
+  } catch(e) {
+    toast('删除代理请求失败');
+  }
+}
+
+async function testProxy(index, btn) {
+  const resEl = $(`#proxy-test-${index}`);
+  if (resEl) {
+    resEl.className = 'proxy-test';
+    resEl.textContent = '测试中...';
+  }
+  const original = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '测试中';
+  }
+  try {
+    const r = await fetch('/api/proxies/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({index})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (resEl) {
+        const reg = d.registration || {};
+        resEl.textContent = `注册可用 HTTP ${reg.status || d.status} ${reg.elapsed || d.elapsed}s`;
+      }
+      toast(`第 ${index + 1} 个代理可用`);
+    } else {
+      if (resEl) {
+        resEl.className = 'proxy-test err';
+        const basic = d.basic || {};
+        const reg = d.registration || {};
+        resEl.textContent = basic.ok ? `基础通，x.ai失败 ${reg.elapsed || d.elapsed || ''}s` : `基础不通 ${basic.elapsed || d.elapsed || ''}s`;
+      }
+      toast(`第 ${index + 1} 个代理不可用`);
+    }
+  } catch(e) {
+    if (resEl) {
+      resEl.className = 'proxy-test err';
+      resEl.textContent = '请求异常';
+    }
+    toast('测试代理请求失败');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = original || '测试';
+    }
+  }
+}
+
+async function testAllProxies() {
+  if (localProxyList.length === 0) {
+    toast('代理池为空');
+    return;
+  }
+  toast(`开始测试 ${localProxyList.length} 个代理`);
+  for (const p of localProxyList) {
+    await testProxy(p.index, null);
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  toast('代理测试完成');
 }
 
 function clearOutlookImport() {

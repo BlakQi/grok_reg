@@ -1,4 +1,4 @@
-"""Web UI for grok_reg - Flask backend with SSE log streaming."""
+﻿"""Web UI for grok_reg - Flask backend with SSE log streaming."""
 from __future__ import annotations
 import base64, io, json, os, queue, sys, threading, time, traceback, pathlib
 from pathlib import Path
@@ -78,6 +78,7 @@ _running = False
 _stats = dict(reg_success=0, reg_fail=0, mint_success=0, mint_fail=0, mint_skip=0)
 _cancel_event = threading.Event()
 _accounts_lock = threading.Lock()
+_proxies_lock = threading.Lock()
 
 # CPA mint queue lock
 _mint_lock = threading.Lock()
@@ -117,6 +118,77 @@ def save_config(data):
         existing[k] = v
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(existing, f, ensure_ascii=False, indent=2)
+
+def _proxy_config_list(cfg=None):
+    cfg = cfg or load_config()
+    raw = cfg.get("proxies") or []
+    if isinstance(raw, str):
+        values = raw.splitlines()
+    elif isinstance(raw, (list, tuple)):
+        values = raw
+    else:
+        values = []
+    return [str(item or "").strip() for item in values if str(item or "").strip()]
+
+def _proxy_kind(proxy: str) -> str:
+    from urllib.parse import urlparse
+
+    return (urlparse(str(proxy or "").strip()).scheme or "").lower()
+
+def _proxy_label(proxy: str) -> str:
+    from urllib.parse import unquote, urlparse
+
+    value = str(proxy or "").strip()
+    parsed = urlparse(value)
+    scheme = (parsed.scheme or "proxy").lower()
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    name = unquote(parsed.fragment or "").strip()
+    if name:
+        return f"{name} ({scheme}://{host}{port})"
+    return f"{scheme}://{host}{port}" if host else value[:80]
+
+def _parse_proxy_import(raw_text: str):
+    from urllib.parse import urlparse
+
+    allowed = {"http", "https", "socks", "socks5", "socks5h", "vless"}
+    rows, invalid = [], []
+    for line_no, raw_line in enumerate((raw_text or "").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";", "//")):
+            continue
+        parsed = urlparse(line)
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in allowed:
+            invalid.append(dict(line=line_no, reason="unsupported proxy scheme"))
+            continue
+        if not parsed.hostname:
+            invalid.append(dict(line=line_no, reason="missing proxy host"))
+            continue
+        try:
+            _ = parsed.port
+        except ValueError:
+            invalid.append(dict(line=line_no, reason="invalid proxy port"))
+            continue
+        rows.append(line)
+    return rows, invalid
+
+def proxy_summary():
+    cfg = load_config()
+    proxies = _proxy_config_list(cfg)
+    manual_proxy = str(cfg.get("proxy") or "").strip()
+    return dict(
+        proxy=manual_proxy,
+        cpa_proxy=str(cfg.get("cpa_proxy") or "").strip(),
+        proxy_file=str(cfg.get("proxy_file") or "").strip(),
+        proxy_rotation=str(cfg.get("proxy_rotation") or "per_account").strip() or "per_account",
+        mode="pool" if proxies else ("manual" if manual_proxy else "direct"),
+        count=len(proxies),
+        proxies=[
+            dict(index=i, value=value, label=_proxy_label(value), kind=_proxy_kind(value))
+            for i, value in enumerate(proxies)
+        ],
+    )
 
 def cpa_auth_dir():
     try:
@@ -439,24 +511,56 @@ def _run_registration(extra: int, threads: int):
         reg_threads = []
         for wid in range(1, threads + 1):
             t = threading.Thread(target=cli._register_worker,
-                args=(wid, task_queue, target_total, af, mint_queue, False, do_mint_inline), daemon=True)
+                args=(wid, task_queue, target_total, af, mint_queue, False, do_mint_inline),
+                kwargs={"cancel_callback": _cancel_event.is_set},
+                daemon=True)
             t.start()
             reg_threads.append(t)
         for t in reg_threads:
             while t.is_alive():
                 if _cancel_event.is_set():
+                    log_cb("[Web] 收到停止信号，正在停止注册线程...")
+                    while True:
+                        try:
+                            task_queue.get_nowait()
+                            task_queue.task_done()
+                        except queue.Empty:
+                            break
+                    try:
+                        reg.shutdown_browser()
+                    except Exception:
+                        pass
                     log_cb("[Web] 收到取消信号，正在等待当前浏览器会话结束...")
                     break
                 t.join(timeout=1.0)
             if _cancel_event.is_set():
                 break
         if mint_queue is not None:
-            log_cb("[Web] 正在等待 CPA Mint 队列处理完成...")
-            mint_queue.join()
+            if _cancel_event.is_set():
+                log_cb("[Web] 已停止注册，清理未开始的 CPA Mint 队列...")
+                while True:
+                    try:
+                        mint_queue.get_nowait()
+                        mint_queue.task_done()
+                    except queue.Empty:
+                        break
+            else:
+                log_cb("[Web] 正在等待 CPA Mint 队列处理完成...")
+                while getattr(mint_queue, "unfinished_tasks", 0) > 0:
+                    if _cancel_event.is_set():
+                        log_cb("[Web] 收到停止信号，清理剩余 CPA Mint 队列...")
+                        while True:
+                            try:
+                                mint_queue.get_nowait()
+                                mint_queue.task_done()
+                            except queue.Empty:
+                                break
+                        break
+                    time.sleep(0.5)
             for _ in mint_threads:
                 mint_queue.put(cli._MINT_STOP)
             for t in mint_threads:
-                t.join(timeout=120)
+                t.join(timeout=5 if _cancel_event.is_set() else 120)
         try: reg.shutdown_browser()
         except Exception: pass
         with cli._stats_lock:
@@ -502,6 +606,175 @@ def api_accounts_import():
         msg=f"[Web] 导入账号完成: 新增={result['imported']}, 重复={result['skipped_duplicates']}, 格式错误={result['invalid_count']}"
     ))
     return jsonify(dict(ok=True, **result))
+
+@app.route("/api/proxies", methods=["GET"])
+def api_proxies():
+    try:
+        return jsonify(dict(ok=True, **proxy_summary()))
+    except Exception as e:
+        return jsonify(dict(ok=False, error=str(e))), 500
+
+@app.route("/api/proxies/import", methods=["POST"])
+def api_proxies_import():
+    try:
+        data = request.get_json(force=True) or {}
+        raw_text = data.get("text") or data.get("content") or ""
+        if not str(raw_text).strip():
+            return jsonify(dict(ok=False, error="empty_import_text")), 400
+        rows, invalid = _parse_proxy_import(str(raw_text))
+        with _proxies_lock:
+            cfg = load_config()
+            existing = _proxy_config_list(cfg)
+            existing_set = set(existing)
+            imported = []
+            skipped = 0
+            for row in rows:
+                if row in existing_set:
+                    skipped += 1
+                    continue
+                existing.append(row)
+                existing_set.add(row)
+                imported.append(row)
+            if imported:
+                update = {
+                    "proxy": "",
+                    "cpa_proxy": "",
+                    "proxies": existing,
+                    "proxy_rotation": str(cfg.get("proxy_rotation") or "per_account").strip() or "per_account",
+                }
+                save_config(update)
+        summary = proxy_summary()
+        _broadcast(dict(
+            ts=time.strftime("%H:%M:%S"),
+            msg=f"[Web] Proxies imported: new={len(imported)}, duplicate={skipped}, invalid={len(invalid)}"
+        ))
+        return jsonify(dict(ok=True, imported=len(imported), skipped_duplicates=skipped, invalid_count=len(invalid), invalid=invalid, **summary))
+    except Exception as e:
+        return jsonify(dict(ok=False, error=str(e))), 500
+
+@app.route("/api/proxies/manual", methods=["POST"])
+def api_proxies_manual():
+    try:
+        data = request.get_json(force=True) or {}
+        proxy = str(data.get("proxy") or "").strip()
+        if proxy:
+            rows, invalid = _parse_proxy_import(proxy)
+            if invalid or not rows:
+                return jsonify(dict(ok=False, error="invalid proxy URL", invalid=invalid)), 400
+            proxy = rows[0]
+        with _proxies_lock:
+            save_config({
+                "proxy": proxy,
+                "cpa_proxy": proxy,
+                "proxies": [],
+                "proxy_file": "",
+                "proxy_rotation": "per_account",
+            })
+        _broadcast(dict(
+            ts=time.strftime("%H:%M:%S"),
+            msg=f"[Web] Manual proxy saved: {_proxy_label(proxy) if proxy else 'direct'}"
+        ))
+        return jsonify(dict(ok=True, **proxy_summary()))
+    except Exception as e:
+        return jsonify(dict(ok=False, error=str(e))), 500
+
+@app.route("/api/proxies/delete", methods=["POST"])
+def api_proxies_delete():
+    try:
+        data = request.get_json(force=True) or {}
+        index = int(data.get("index"))
+        with _proxies_lock:
+            cfg = load_config()
+            proxies = _proxy_config_list(cfg)
+            if index < 0 or index >= len(proxies):
+                return jsonify(dict(ok=False, error="proxy index out of range")), 404
+            removed = proxies.pop(index)
+            save_config({"proxies": proxies})
+        _broadcast(dict(ts=time.strftime("%H:%M:%S"), msg=f"[Web] Proxy deleted: #{index + 1} {_proxy_label(removed)}"))
+        return jsonify(dict(ok=True, removed_index=index, **proxy_summary()))
+    except Exception as e:
+        return jsonify(dict(ok=False, error=str(e))), 500
+
+@app.route("/api/proxies/test", methods=["POST"])
+def api_proxies_test():
+    data = request.get_json(force=True) or {}
+    target = str(data.get("target") or "https://accounts.x.ai").strip()
+    basic_target = str(data.get("basic_target") or "https://www.gstatic.com/generate_204").strip()
+    try:
+        index = int(data.get("index"))
+        cfg = load_config()
+        proxies = _proxy_config_list(cfg)
+        if index < 0 or index >= len(proxies):
+            return jsonify(dict(ok=False, error="proxy index out of range")), 404
+        raw_proxy = proxies[index]
+        t0 = time.time()
+        from curl_cffi import requests as curl_requests
+        from proxy_runtime import clear_thread_proxy_selection, resolve_config_proxy
+
+        test_cfg = dict(cfg)
+        test_cfg["proxy"] = ""
+        test_cfg["proxies"] = [raw_proxy]
+        endpoint = resolve_config_proxy(test_cfg, rotate=True)
+        request_proxies = {"http": endpoint, "https": endpoint} if endpoint else {}
+        timeout = float(data.get("timeout") or 20)
+
+        def probe(url: str) -> dict:
+            started = time.time()
+            try:
+                resp = curl_requests.get(
+                    url,
+                    proxies=request_proxies,
+                    timeout=timeout,
+                    impersonate="chrome120",
+                    allow_redirects=True,
+                )
+                elapsed = round(time.time() - started, 2)
+                return dict(
+                    ok=200 <= int(resp.status_code) < 500,
+                    status=int(resp.status_code),
+                    elapsed=elapsed,
+                    bytes=len(resp.content or b""),
+                    url=url,
+                )
+            except Exception as exc:
+                return dict(
+                    ok=False,
+                    error=str(exc),
+                    elapsed=round(time.time() - started, 2),
+                    url=url,
+                )
+
+        try:
+            basic = probe(basic_target)
+            target_res = probe(target) if basic.get("ok") else dict(
+                ok=False,
+                error="skipped because basic connectivity failed",
+                url=target,
+                elapsed=0,
+            )
+            elapsed = round(time.time() - t0, 2)
+            ok = bool(target_res.get("ok"))
+            target_error = target_res.get("error") or f"HTTP {target_res.get('status')}"
+            result = dict(
+                ok=ok,
+                index=index,
+                status=target_res.get("status"),
+                elapsed=elapsed,
+                target=target,
+                basic=basic,
+                registration=target_res,
+                label=_proxy_label(raw_proxy),
+            )
+            if not ok:
+                if basic.get("ok"):
+                    result["error"] = f"basic ok, registration target failed: {target_error}"
+                else:
+                    result["error"] = f"basic connectivity failed: {basic.get('error') or ('HTTP ' + str(basic.get('status')))}"
+            return jsonify(result), (200 if ok else 502)
+        finally:
+            clear_thread_proxy_selection()
+    except Exception as e:
+        return jsonify(dict(ok=False, error=str(e), target=target)), 500
 
 @app.route("/api/cpa/export/summary", methods=["GET"])
 def api_cpa_export_summary():
@@ -623,6 +896,12 @@ def api_stop():
     if not _is_running():
         return jsonify(dict(ok=False, error="注册任务没有运行")), 400
     _cancel_event.set()
+    try:
+        import grok_register_ttk as reg
+
+        reg.shutdown_browser()
+    except Exception:
+        pass
     return jsonify(dict(ok=True))
 
 # CPA probe API

@@ -1,4 +1,4 @@
-"""CLI wrapper for grok_register_ttk — multi-thread register + async CPA mint pipeline.
+﻿"""CLI wrapper for grok_register_ttk — multi-thread register + async CPA mint pipeline.
 
 Architecture:
   Register workers (R)  →  accounts_cli + mint_queue
@@ -237,6 +237,7 @@ def register_one(
     *,
     do_mint_inline: bool = False,
     mint_queue: queue.Queue | None = None,
+    cancel_callback=None,
 ) -> dict | None:
     """Run one registration. Enqueue CPA mint (default) instead of blocking.
 
@@ -245,7 +246,10 @@ def register_one(
     email = ""
     dev_token = ""
     max_mail_retry = 3
-    cancel = DummyStop()
+    cancel = cancel_callback or DummyStop()
+    if cancel():
+        log(worker_id, f"[cancel] skip account {idx}")
+        return None
 
     try:
         _endpoint, pool_size = reg.rotate_registration_proxy()
@@ -281,6 +285,9 @@ def register_one(
             )
             log(worker_id, f"验证码: {code}")
             break
+        except reg.RegistrationCancelled:
+            log(worker_id, f"[cancel] account {idx} cancelled")
+            return None
         except Exception as exc:
             msg = str(exc)
             reg.mark_error(email or "", reason=msg[:120])
@@ -312,6 +319,11 @@ def register_one(
             log_callback=lambda m: log(worker_id, m), cancel_callback=cancel
         )
         password = profile.get("password", "") or ""
+        account_proxy = ""
+        try:
+            account_proxy = reg.selected_config_proxy_raw(getattr(reg, "config", {}) or {})
+        except Exception:
+            account_proxy = ""
         line = f"{email}----{password}----{sso}\n"
         with open(accounts_file, "a", encoding="utf-8") as f:
             f.write(line)
@@ -358,6 +370,7 @@ def register_one(
             "profile": profile,
             "idx": idx,
             "cookies": cookies,
+            "proxy": account_proxy,
         }
 
         if do_mint_inline:
@@ -375,6 +388,9 @@ def register_one(
 
         _inc("reg_success")
         return job
+    except reg.RegistrationCancelled:
+        log(worker_id, f"[cancel] account {idx} cancelled")
+        return None
     except Exception as exc:
         log(worker_id, f"! 注册失败: {exc}")
         reg.mark_error(email or "", reason=str(exc)[:120])
@@ -400,6 +416,11 @@ def _run_mint_job(worker_id: int | str, job: dict[str, Any], config: dict) -> di
         return {"ok": False, "skipped": True, "email": email}
     try:
         import cpa_export
+        mint_config = dict(config or {})
+        if "proxy" in job:
+            job_proxy = str(job.get("proxy") or "").strip()
+            mint_config["proxy"] = job_proxy
+            mint_config["cpa_proxy"] = job_proxy
 
         # page=None always — force standalone path inside export
         result = cpa_export.export_cpa_xai_for_account(
@@ -408,7 +429,7 @@ def _run_mint_job(worker_id: int | str, job: dict[str, Any], config: dict) -> di
             page=None,
             cookies=job.get("cookies"),
             sso=job.get("sso") or "",
-            config=config,
+            config=mint_config,
             log_callback=lambda m: log(worker_id, m),
         )
         if result.get("ok"):
@@ -436,8 +457,11 @@ def _register_worker(
     mint_queue: queue.Queue | None,
     forever: bool,
     do_mint_inline: bool,
+    cancel_callback=None,
 ):
     while True:
+        if cancel_callback and cancel_callback():
+            break
         try:
             idx = task_queue.get_nowait()
         except queue.Empty:
@@ -452,6 +476,8 @@ def _register_worker(
 
         retry = 0
         while retry < 2:
+            if cancel_callback and cancel_callback():
+                break
             try:
                 result = register_one(
                     worker_id,
@@ -460,11 +486,12 @@ def _register_worker(
                     accounts_file,
                     do_mint_inline=do_mint_inline,
                     mint_queue=mint_queue,
+                    cancel_callback=cancel_callback,
                 )
                 if result:
                     break
                 retry += 1
-                if retry < 2:
+                if retry < 2 and not (cancel_callback and cancel_callback()):
                     log(worker_id, f"[retry] 账号 {idx} 失败，重试 {retry}/1")
                     try:
                         reg.restart_browser(log_callback=lambda m: log(worker_id, m))
@@ -472,7 +499,7 @@ def _register_worker(
                         pass
             except Exception:
                 retry += 1
-                if retry < 2:
+                if retry < 2 and not (cancel_callback and cancel_callback()):
                     log(worker_id, f"[retry] 账号 {idx} 异常，重试 {retry}/1")
                     traceback.print_exc()
                     try:
