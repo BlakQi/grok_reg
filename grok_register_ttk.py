@@ -23,6 +23,12 @@ import json
 from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage.errors import PageDisconnectedError
 from curl_cffi import requests
+from proxy_runtime import (
+    clear_thread_proxy_selection,
+    proxy_pool_size,
+    resolve_config_proxy,
+    selected_config_proxy_raw,
+)
 
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -66,7 +72,11 @@ DEFAULT_CONFIG = {
     "ddg_cf_api_base": "",
     "ddg_cf_inbox_jwt": "",
     "ddg_cf_messages_path": "/api/mails",
-    "proxy": "http://127.0.0.1:7890",
+    "proxy": "",
+    "proxies": [],
+    "proxy_rotation": "per_account",
+    "sing_box_path": "",
+    "vless_local_port": 0,
     "enable_nsfw": True,
     "register_count": 1,
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
@@ -373,8 +383,37 @@ EXTENSION_PATH = os.path.abspath(
 DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
 
 
+def get_registration_proxy():
+    """Resolve the configured registration proxy to an HTTP client endpoint."""
+    return resolve_config_proxy(config)
+
+
+def rotate_registration_proxy():
+    """Select the next pool exit for a new account; return endpoint and pool size."""
+    size = proxy_pool_size(config)
+    strategy = str(config.get("proxy_rotation") or "per_account").strip().lower()
+    endpoint = resolve_config_proxy(config, rotate=(size > 1 and strategy == "per_account"))
+    return endpoint, size
+
+
+def registration_proxy_label():
+    raw = selected_config_proxy_raw(config)
+    if not raw:
+        return "直连"
+    try:
+        from cpa_xai.proxyutil import proxy_log_label
+
+        return proxy_log_label(raw) or "直连"
+    except Exception:
+        return "已配置代理"
+
+
+def release_registration_proxy():
+    clear_thread_proxy_selection()
+
+
 def get_proxies():
-    proxy = config.get("proxy", "")
+    proxy = get_registration_proxy()
     if proxy:
         return {"http": proxy, "https": proxy}
     return {}
@@ -716,7 +755,7 @@ def create_browser_options():
         options.add_extension(EXTENSION_PATH)
     # Apply config.json "proxy" to Chromium. Without this, only HTTP helpers
     # used get_proxies(); the browser itself fell through to system/env proxy.
-    proxy = (config.get("proxy") or "").strip()
+    proxy = get_registration_proxy()
     if proxy:
         try:
             from urllib.parse import urlparse
@@ -738,10 +777,16 @@ def _build_request_kwargs(**kwargs):
     proxies = request_kwargs.pop("proxies", None)
     if proxies is None:
         proxies = get_proxies()
-    if proxies:
-        request_kwargs["proxies"] = proxies
+    # An explicit empty mapping also prevents curl_cffi from inheriting a
+    # shell-level proxy when config says direct connection.
+    request_kwargs["proxies"] = proxies or {}
     request_kwargs.setdefault("timeout", 15)
     return request_kwargs
+
+
+def _proxy_allows_direct_fallback():
+    """Never bypass any explicitly configured proxy route."""
+    return not bool(selected_config_proxy_raw(config))
 
 
 def http_get(url, **kwargs):
@@ -750,7 +795,9 @@ def http_get(url, **kwargs):
     except Exception as exc:
         err = str(exc)
         # 代理不可用时回退为直连，避免整个流程直接失败
-        if "127.0.0.1 port 7890" in err or "Could not connect to server" in err:
+        if _proxy_allows_direct_fallback() and (
+            "127.0.0.1 port 7890" in err or "Could not connect to server" in err
+        ):
             retry_kwargs = dict(kwargs)
             retry_kwargs["proxies"] = {}
             return requests.get(url, **_build_request_kwargs(**retry_kwargs))
@@ -762,7 +809,9 @@ def http_post(url, **kwargs):
         return requests.post(url, **_build_request_kwargs(**kwargs))
     except Exception as exc:
         err = str(exc)
-        if "127.0.0.1 port 7890" in err or "Could not connect to server" in err:
+        if _proxy_allows_direct_fallback() and (
+            "127.0.0.1 port 7890" in err or "Could not connect to server" in err
+        ):
             retry_kwargs = dict(kwargs)
             retry_kwargs["proxies"] = {}
             return requests.post(url, **_build_request_kwargs(**retry_kwargs))
@@ -1440,7 +1489,7 @@ def outlook_get_oai_code(
             timeout=timeout,
             poll_interval=poll_interval,
             user_agent=str(config.get("user_agent") or "Mozilla/5.0"),
-            proxy=str(config.get("proxy") or ""),
+            proxy=get_registration_proxy(),
             log_callback=log_callback,
             cancel_callback=cancel_callback,
         )
@@ -3587,13 +3636,24 @@ class GrokRegisterGUI:
         prefix = f"[T{worker_id}]"
         logf = lambda m: self.log(f"{prefix} {m}")
         try:
-            start_browser(log_callback=logf)
-            logf("[*] 浏器已吊")
+            logf("[*] 注册线程已启动")
             while not self.should_stop():
                 try:
                     idx = task_queue.get_nowait()
                 except queue.Empty:
                     break
+                try:
+                    _endpoint, pool_size = rotate_registration_proxy()
+                    if pool_size > 1 and TabPool.get_browser() is not None:
+                        stop_browser()
+                    start_browser(log_callback=logf)
+                    logf(f"[*] 注册出口: {registration_proxy_label()}")
+                except Exception as exc:
+                    with self.stats_lock:
+                        self.fail_count += 1
+                    logf(f"[-] 代理初始化失败: {exc}")
+                    self.update_stats()
+                    continue
                 logf(f"--- 开始 {idx}/{total} 个账号 ---")
                 try:
                     self._run_single_registration(idx, total, logf)
@@ -3608,12 +3668,16 @@ class GrokRegisterGUI:
                     self.update_stats()
                     if self.should_stop():
                         break
-                    restart_browser(log_callback=logf)
+                    if proxy_pool_size(config) > 1:
+                        stop_browser()
+                    else:
+                        restart_browser(log_callback=logf)
                     sleep_with_cancel(1, self.should_stop)
         except Exception as exc:
             logf(f"[!] 线程异常: {exc}")
         finally:
             stop_browser()
+            release_registration_proxy()
 
     def run_registration(self, count, worker_count):
         task_queue = queue.Queue()

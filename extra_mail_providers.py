@@ -77,9 +77,14 @@ def _pick(values: list[str]) -> str:
     return values[random.randrange(len(values))]
 
 
-def _proxy(cfg: dict[str, Any]) -> dict[str, str] | None:
-    value = _clean(cfg.get("proxy") or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
-    return {"http": value, "https": value} if value else None
+def _proxy(cfg: dict[str, Any]) -> dict[str, str]:
+    from proxy_runtime import proxy_candidates, resolve_config_proxy
+
+    if proxy_candidates(cfg):
+        value = resolve_config_proxy(cfg)
+    else:
+        value = ""
+    return {"http": value, "https": value} if value else {}
 
 
 def _request(cfg: dict[str, Any], method: str, url: str, **kwargs):

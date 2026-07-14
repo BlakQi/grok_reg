@@ -365,10 +365,10 @@ def decode_mailbox_token(token: str) -> dict[str, Any]:
     return data
 
 
-def _request_proxies(proxy: str = "") -> dict[str, str] | None:
-    proxy = _clean(proxy or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
+def _request_proxies(proxy: str = "") -> dict[str, str]:
+    proxy = _clean(proxy)
     if not proxy:
-        return None
+        return {}
     return {"http": proxy, "https": proxy}
 
 

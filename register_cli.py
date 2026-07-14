@@ -248,6 +248,15 @@ def register_one(
     cancel = DummyStop()
 
     try:
+        _endpoint, pool_size = reg.rotate_registration_proxy()
+        if pool_size > 1 and reg.TabPool.get_browser() is not None:
+            reg.stop_browser()
+        log(worker_id, f"[*] 注册出口: {reg.registration_proxy_label()}")
+    except Exception as exc:
+        log(worker_id, f"! 代理初始化失败: {exc}")
+        return None
+
+    try:
         _ensure_browser(worker_id, force_recycle=False)
     except Exception as exc:
         log(worker_id, f"! 浏览器启动失败: {exc}")
@@ -478,6 +487,10 @@ def _register_worker(
     # worker exit: free browser
     try:
         reg.stop_browser()
+    except Exception:
+        pass
+    try:
+        reg.release_registration_proxy()
     except Exception:
         pass
     log(worker_id, "register worker exit")

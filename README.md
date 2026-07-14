@@ -78,6 +78,8 @@ cp config.example.json config.json
 | 字段 | 作用 |
 |------|------|
 | `proxy` | **注册** Chromium + 邮箱等 HTTP |
+| `proxies` | **注册代理池**；非空时优先于 `proxy` |
+| `proxy_file` | 一行一个代理 URL 的纯文本代理池文件 |
 | `cpa_proxy` | **OIDC mint**（device-code / token 轮询 / probe / 确认浏览器） |
 
 解析顺序（配置优先，**盖过** shell 的 `https_proxy`）：
@@ -90,6 +92,55 @@ cpa_proxy  >  proxy  >  环境变量 https_proxy/http_proxy
 - 两者都配 → mint 只用 `cpa_proxy`
 - 以前调试时在 shell 里 `export https_proxy=7890` **不会再压过** config
 - Chromium `--proxy-server` **不能**带 `user:pass`（账号会剥掉，仅 host:port）；HTTP 库仍可用带认证的 URL
+- `proxy` 与 `proxies` 都为空 → 注册流程强制直连，不读取 shell 代理，也不会启动 sing-box
+- 只要配置了任一出口，连接失败就报错并由下一账号轮换，不会静默回退直连
+
+多出口使用 JSON 数组；HTTP、SOCKS5 和 VLESS 可以混合。默认
+`proxy_rotation=per_account`，每个新账号按顺序轮换出口；设为 `per_thread`
+则每个注册线程固定使用一个出口。
+
+```json
+{
+  "proxy": "",
+  "proxies": [
+    "vless://UUID-1@server-1:443?...",
+    "vless://UUID-2@server-2:443?...",
+    "http://127.0.0.1:7890"
+  ],
+  "proxy_rotation": "per_account"
+}
+```
+
+也可以把代理原样逐行保存到 `proxies.txt`，然后配置：
+
+```json
+{
+  "proxy_file": "proxies.txt",
+  "proxy_rotation": "per_account"
+}
+```
+
+`proxies.txt` 默认被 Git 忽略，避免提交代理账号密码。
+
+带认证的 `http://user:password@host:port` 会自动通过本地 sing-box
+适配，因此 Chromium 与 HTTP 请求都能正确携带代理认证。
+
+#### 直接使用 VLESS 节点
+
+`proxy` 或 `proxies` 项可以填写标准 `vless://...` 分享链接。程序会启动项目目录
+`.runtime/sing-box.exe`，创建仅监听 `127.0.0.1` 的临时 mixed 代理，注册
+Chromium、邮箱请求和注册 HTTP 请求会共用这个出口。VLESS 启动失败时流程会
+直接报错，不会静默回退为直连。
+
+```json
+{
+  "proxy": "vless://UUID@server:port?security=tls&type=ws&host=example.com&sni=example.com&path=%2F",
+  "sing_box_path": ".runtime/sing-box.exe",
+  "vless_local_port": 0
+}
+```
+
+如未随项目放置 sing-box，也可通过 `SING_BOX_PATH` 环境变量指定可执行文件。
 
 ### 与 CPA 相关的关键项（摘要）
 

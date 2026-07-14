@@ -38,7 +38,9 @@ def resolve_proxy(explicit: str | None = None) -> str:
         (os.environ.get("HTTP_PROXY") or "").strip(),
     ):
         if cand:
-            return cand
+            from proxy_runtime import resolve_proxy_url
+
+            return resolve_proxy_url(cand)
     return ""
 
 

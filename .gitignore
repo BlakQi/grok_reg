@@ -4,10 +4,12 @@ __pycache__/
 *.pyd
 .venv/
 dist/
+.runtime/
 
 # secrets / local runtime
 config.json
 config.local.json
+proxies.txt
 config.json.bak*
 .env
 token.json

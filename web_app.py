@@ -319,6 +319,9 @@ def _bg_mint_single(email: str, password: str, sso: str, force_overwrite: bool =
 
         reg_cfg = load_config()
         proxy = reg_cfg.get("cpa_proxy") or reg_cfg.get("proxy") or None
+        from cpa_xai.proxyutil import proxy_log_label
+
+        proxy_label = proxy_log_label(proxy or "") or "直连"
         cpa_dir = str(reg_cfg.get("cpa_hotload_dir") or "").strip()
 
         if force_overwrite:
@@ -342,7 +345,7 @@ def _bg_mint_single(email: str, password: str, sso: str, force_overwrite: bool =
             except Exception as ex:
                 log_cb(f"删除热加载目录旧 CPA 文件失败: {ex}")
 
-        log_cb(f"正在拉起 Chromium 访问 accounts.x.ai 进行授权确认 (代理: {proxy or '直连'})...")
+        log_cb(f"正在拉起 Chromium 访问 accounts.x.ai 进行授权确认 (代理: {proxy_label})...")
 
         r = cpa_export.export_cpa_xai_for_account(
             email=email,
